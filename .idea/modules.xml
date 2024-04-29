@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/esp_ble_classic.iml" filepath="$PROJECT_DIR$/esp_ble_classic.iml" />
+      <module fileurl="file://$PROJECT_DIR$/android/esp_ble_classic_android.iml" filepath="$PROJECT_DIR$/android/esp_ble_classic_android.iml" />
+    </modules>
+  </component>
+</project>

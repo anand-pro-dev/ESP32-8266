@@ -1,0 +1,754 @@
+#include <LiquidCrystal.h>
+const int rs = 7, en = 6, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+#include <EEPROM.h>
+#include <hiduniversal.h>
+#include <Usb.h>
+#include <usbhub.h>
+#include <hidboot.h>
+USB Usb;
+USBHub Hub(&Usb);
+HIDUniversal Hid(&Usb);
+String data = "";
+String l_data = "";
+String barcode = "";
+String f_t;
+bool buttonClicked;
+bool fussionON;
+bool scanON;
+bool coolingON;
+int fussionIndex=0;
+int coolingIndex=0;
+
+class KbdRptParser : public KeyboardReportParser {
+    void PrintKey(uint8_t mod, uint8_t key);
+  protected:
+    virtual void OnKeyDown  (uint8_t mod, uint8_t key);
+    virtual void OnKeyPressed(uint8_t key);
+};
+
+KbdRptParser Prs;
+
+const int OUTPUT_PIN=A1;
+const int BUZZ_PIN=A2;
+
+int first_digit ;
+int second_digit ;
+int third_digit ;
+int cursor_position_y=15;
+int cursor_position_x=1;
+int cursor_position_y_var=15;
+int cursor_position_x_var=1;
+int digit_max = 9;
+const int pushBT1 = 8; 
+const int pushBT2 = 10;
+const int pushBT3 = 11;
+const int pushBT4 = 12;
+
+int fusion_state = 0;
+
+int upButton = 10;
+int downButton = 11;
+int selectButton = 8;
+int menu = 1;
+
+bool man_f ;
+bool scan_f;
+
+int lower_limit = 1;
+int upper_limit = 900;
+
+enum OPERATION_MODE {
+  first_one,
+  NONE,
+  SCAN,
+  MANUAL,
+  RUNNING,
+  SELECTED
+};
+OPERATION_MODE mode = NONE;
+OPERATION_MODE previous_mode = NONE;
+
+void setup() //..................................................  Set up
+{ 
+Serial.begin(115200);
+
+  lcd.begin (20,4);
+  pinMode(pushBT1, INPUT_PULLUP);
+  pinMode(pushBT2, INPUT_PULLUP); 
+  pinMode(pushBT3, INPUT_PULLUP);
+  pinMode(pushBT4, INPUT_PULLUP);
+  pinMode (OUTPUT_PIN, OUTPUT);
+   pinMode (BUZZ_PIN, OUTPUT);
+ 
+  digitalWrite(pushBT1, HIGH);
+  digitalWrite(pushBT2, HIGH);
+  digitalWrite(pushBT3 , HIGH);
+  digitalWrite(pushBT4 , HIGH);
+  
+ pinMode(upButton, INPUT_PULLUP);
+  pinMode(downButton, INPUT_PULLUP);
+  pinMode(selectButton, INPUT_PULLUP);
+   
+  lcd.clear(); lcd.setCursor(6,0); lcd.print("WELCOME"); 
+  lcd.setCursor(8,1); lcd.print("TO"); 
+  lcd.setCursor(2,2); lcd.print("ELECTRO FUSSION");
+  lcd.setCursor(0,3);   lcd.print("POLY WELDING MACHINE"); 
+  delay(500);
+ 
+  first();
+  
+  Usb.Init();
+  delay(200);
+  Hid.SetReportParser(0, (HIDReportParser*)&Prs);
+  delay(200);
+  
+ }
+
+void first(){
+   updateMenu();
+   mode = first_one;
+   previous_mode=SELECTED;
+  }
+
+void relay()    
+{ 
+  digitalWrite (OUTPUT_PIN, LOW);
+  lcd.clear(); lcd.setCursor(1,1); lcd.print("Fusion Stopped"); 
+  delay(2000);
+        resetAll();
+  }
+
+void resetAll()
+{    
+    mode=NONE;
+    previous_mode=NONE;
+     man_f = false;
+      scan_f = false;
+    data="";
+    l_data="";
+    cursor_position_y_var=cursor_position_y;
+    first_digit;
+    second_digit;
+    third_digit;
+    fussionON=false;
+    scanON=false;
+    coolingON=false;
+    fussionIndex=0;
+    coolingIndex=0;
+    
+    digitalWrite (OUTPUT_PIN, LOW);
+    lcd.clear();
+    lcd.noBlink();
+    Serial.println("resetAll_ok");
+    lcd.setCursor (0, 1);
+    lcd.print("SELECT MODE :-");
+    lcd.setCursor (0, 2);
+    lcd.print("PRESS + FOR SCAN");
+    lcd.setCursor (0, 3);
+    lcd.print("PRESS OK FOR MANUAL");
+ 
+}
+
+void reStart()
+{
+  int checkvalue=l_data.toInt();
+  if(fussionIndex<=0 || (checkvalue-fussionIndex) < (checkvalue/4))
+  {
+   fussionON=false;
+   coolingON=false;
+   fussionIndex=0;
+   coolingIndex=0;
+   displayfusiontime(l_data);
+  }
+  else
+  { 
+       resetAll(); 
+  }
+  
+}
+
+void Cool_State(){
+  if (SCAN == true){
+    fusion_state = 1;
+    }
+  }
+
+void loop() {  //................................................ Loop
+
+if (digitalRead(downButton) == LOW && mode == first_one){
+    menu++;
+    updateMenu();
+   Serial.println(downButton);
+    delay(200);
+   
+  }
+  if (digitalRead(upButton) == LOW && mode == first_one){
+    menu--;
+    updateMenu();
+    delay(200);
+     
+  }
+  if (digitalRead(selectButton) == LOW  && mode == first_one) {
+    executeAction();
+    updateMenu();
+    delay(200);
+  }
+  
+if(fussionON==true && mode== RUNNING && fussionIndex>=0)
+{
+  Serial.print("FusionTimeLoop");
+  digitalWrite(OUTPUT_PIN,HIGH);
+  fusiontimeloop();
+}
+if(fussionON==false && coolingON==true && mode== RUNNING)
+{
+  digitalWrite(OUTPUT_PIN,LOW);
+  coolingTimeLoop();  
+                       
+                          if(coolingIndex<=0)
+                          {
+                            coolingON=false;
+                            delay (1000);
+                            lcd.clear();
+                            fussionIndex = 0;
+                            coolingIndex = 0;
+                             BUZZ();
+                             Cool_State();
+                          }
+  
+  }
+
+  if (digitalRead (pushBT2) == LOW && (mode == RUNNING)){
+     Serial.println("Relay");
+      relay();   
+  }
+  if (digitalRead (pushBT2) == LOW && (mode == SCAN )){
+     Serial.println("resetAll");
+      resetAll();
+  }
+
+
+ if (digitalRead (pushBT1) == LOW && (mode == RUNNING)){
+     Serial.println("reStart");
+    reStart();
+  }
+  
+
+  if (scan_f == true || digitalRead (pushBT4) == LOW && (mode == NONE)){
+    mode=SCAN;
+    previous_mode=SELECTED;
+    scanON=true;
+    scan_f = false;
+    fusion_state = 1;
+    lcd.clear();
+    lcd.setCursor (0, 1);
+    lcd.print("MODE IS SCAN");
+    delay(1000);
+    lcd.clear();
+    lcd.setCursor (0, 1);
+    lcd.print("PLEASE SCAN BAR CODE");
+ 
+    
+  }
+
+  if(scanON==true)
+  {
+    Usb.Task();
+   Serial.println("SCANNER");
+   fusion_state = 1;
+  }
+
+  if (man_f == true || digitalRead (pushBT1) == LOW && (mode == NONE)){
+    Serial.print("MANUAL");
+    mode=MANUAL;
+    previous_mode=SELECTED;
+    man_f = false;
+    
+    lcd.clear();
+    lcd.setCursor (0, 1);
+    lcd.print("FUSION TIME :-  ");
+     
+    first_digit = EEPROM.read(1);
+    second_digit = EEPROM.read(2);
+    third_digit = EEPROM.read(3);
+    
+    lcd.setCursor (cursor_position_y, cursor_position_x);
+    lcd.blink();
+    lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+    lcd.print(first_digit);
+    lcd.setCursor (cursor_position_y_var+1, cursor_position_x_var);
+    lcd.print(second_digit);
+    lcd.setCursor (cursor_position_y_var+2, cursor_position_x_var);
+    lcd.print(third_digit);
+    lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+    delay(1000);
+    
+  }
+
+  if (digitalRead (pushBT4) == LOW && (mode == MANUAL))
+  {
+    
+    if(cursor_position_y_var==cursor_position_y)
+    { 
+      Serial.println("IF 1");
+      Serial.println("cursor_position_y_var");
+    Serial.println(cursor_position_y_var); 
+    Serial.println("cursor_position_y");
+    Serial.println(cursor_position_y);
+    
+ first_digit = EEPROM.read(1);
+      first_digit = first_digit + 1;
+      if(first_digit > digit_max)
+      {
+         first_digit=0;    
+      }
+      
+      EEPROM.update(1,first_digit );   
+        Serial.println(first_digit );
+
+        int val1 = EEPROM.read(1); 
+        Serial.print("EEPROM"); 
+         Serial.println(val1);
+   
+      
+
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      lcd.print(first_digit);
+      lcd.setCursor (cursor_position_y_var+1, cursor_position_x_var);
+      lcd.print(second_digit);
+      lcd.setCursor (cursor_position_y_var+2, cursor_position_x_var);
+      lcd.print(third_digit);
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      delay(1000);
+
+    }
+    else if(cursor_position_y_var==(cursor_position_y+1))
+    { 
+      Serial.println("IF 2");
+      Serial.println("cursor_position_y_var");
+    Serial.println(cursor_position_y_var); 
+    Serial.println("cursor_position_y");
+    Serial.println(cursor_position_y);
+    Serial.println("cursor_position_x_var");
+    Serial.println(cursor_position_x_var);
+
+
+     second_digit = EEPROM.read(2);
+      second_digit = second_digit + 1;
+      if(second_digit > digit_max)
+       
+      {
+        second_digit=0; 
+      }
+       EEPROM.update(2,second_digit);   
+        Serial.println(second_digit);
+
+        int val2 = EEPROM.read(2); 
+        Serial.print("EEPROM"); 
+         Serial.println(val2);
+
+
+    
+      lcd.setCursor (cursor_position_y_var-1, cursor_position_x_var);
+      lcd.print(first_digit);
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      lcd.print(second_digit);
+      lcd.setCursor (cursor_position_y_var+1, cursor_position_x_var);
+      lcd.print(third_digit);
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      
+      delay(1000);
+   
+    }
+    else if(cursor_position_y_var==(cursor_position_y+2))
+    { 
+      Serial.println("IF 3");
+      Serial.println("cursor_position_y_var");
+    Serial.println(cursor_position_y_var); 
+    Serial.println("cursor_position_y");
+    Serial.println(cursor_position_y);
+     
+      
+     third_digit = EEPROM.read(3);
+      third_digit = third_digit + 1;
+      if(third_digit > digit_max)
+      
+      {
+        third_digit=0;
+      } 
+      
+      EEPROM.update(3,third_digit );   
+        Serial.println(third_digit );
+
+        int val3 = EEPROM.read(3); 
+        Serial.print("EEPROM"); 
+         Serial.println(val3);  
+
+    
+      lcd.setCursor (cursor_position_y_var-2, cursor_position_x_var);
+      lcd.print(first_digit);
+      lcd.setCursor (cursor_position_y_var-1, cursor_position_x_var);
+      lcd.print(second_digit);
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      lcd.print(third_digit);
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      delay(1000);
+      
+    }
+
+  }
+
+  if (digitalRead (pushBT3) == LOW && (mode == MANUAL))
+  {
+    Serial.println("IF 4");
+    if(cursor_position_y_var<(cursor_position_y+3) && cursor_position_y_var>(cursor_position_y-1))
+    {
+      cursor_position_y_var=cursor_position_y_var+1;
+      lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+      delay(1000);
+    }
+  }
+  if (digitalRead (pushBT2) == LOW && (mode == MANUAL))
+  {  EEPROM.update(1, first_digit);
+     EEPROM.update(2,second_digit);
+     EEPROM.update(3,third_digit );
+     Serial.println("IF 5");
+     cursor_position_y_var=cursor_position_y;
+     lcd.setCursor (cursor_position_y_var, cursor_position_x_var);
+     lcd.blink();
+     delay(1000);
+     
+     first_digit   ;
+     second_digit  ;
+     third_digit   ;
+  }
+ 
+   if (digitalRead (pushBT1) == LOW  && (mode == MANUAL)){
+      Serial.println("IF 6");
+      int finalvalue =first_digit+second_digit+third_digit;
+     if(finalvalue>0)
+     {  previous_mode=NONE;
+        mode = RUNNING;
+        data= String(first_digit)+String(second_digit)+String(third_digit);
+        if(checkValidFussionValue(data))
+       {
+          first_digit ;
+          second_digit ;
+          third_digit ;
+    
+          displayfusiontime(data);
+       }
+   
+        
+       }  
+     }
+ 
+}  //...........................................................  Loop End
+
+void updateMenu() {
+  switch (menu) {
+    case 0:
+      menu = 1;
+      break;
+    case 1:
+      lcd.clear();
+      lcd.print(">>Mannual");
+      lcd.setCursor(0, 1);
+      lcd.print("  Barcode Scanner");
+      lcd.setCursor(0, 2);
+      lcd.print("  Fusion Data");
+      break;
+    case 2:
+      lcd.clear();
+      lcd.print("  Mannual");
+      lcd.setCursor(0, 1);
+      lcd.print(">>Barcode Scanner");
+      lcd.setCursor(0, 2);
+      lcd.print("  Fusion Data");
+      break;
+    case 3:
+       lcd.clear();
+      lcd.print("  Mannual");
+      lcd.setCursor(0, 1);
+      lcd.print("  Barcode Scanner");
+      lcd.setCursor(0, 2);
+      lcd.print(">>Fusion Data");
+      break;
+      
+    case 4:
+      menu = 1.;
+      break;
+  }
+}
+
+void executeAction() {
+  switch (menu) {
+    case 1:
+      action1();
+      break;
+    case 2:
+      action2();
+      break;
+    case 3:
+      action3();
+      break;
+ 
+  }
+}
+
+void action1() {
+  mode=NONE;
+  man_f = true;
+  mode=MANUAL;
+    previous_mode=SELECTED;
+ fusion_state = 0; 
+    
+}
+void action2() {
+   mode=NONE;
+  scan_f = true;
+    mode=SCAN;
+    previous_mode=SELECTED;
+     fusion_state = 1; 
+}
+void action3() {
+  lcd.clear();
+  lcd.print("  > 3rd Page <");
+   lcd.setCursor(0, 1);
+  lcd.print("  ------------");
+  delay(1500);
+}
+ 
+
+void KbdRptParser::OnKeyDown(uint8_t mod, uint8_t key) {
+  uint8_t c = OemToAscii(mod, key);
+
+  if (c)
+    OnKeyPressed(c);
+}
+
+void KbdRptParser::OnKeyPressed(uint8_t key) {
+  char c = (char)key;
+
+  if (key == 19) {
+    String ret = data;
+    data = "";
+    barcodenewCallback(ret);
+  } else {
+    data += c;
+  }
+}
+
+int string_size_2(const char *c)
+{
+
+  size_t Size = strlen(c);
+  return Size;
+}
+void barcodenewCallback(String data) {
+
+  int len = string_size_2(data.c_str());
+
+      int i=0;
+      barcode="";
+     for (int j = len-1; j >= 0; j--)
+      {
+
+        if(i>2 && i< 6)
+        {
+          barcode += data[j];
+        }
+         i++;
+      }
+
+               len = string_size_2(barcode.c_str());
+               data="";
+              for (int j = len-1; j >= 0; j--)
+              {
+
+               
+                if( ((int)(barcode[j]))==32)
+                {
+                  data="";
+                  break;
+                }
+                else
+                {
+                     data += barcode[j];
+                }
+          
+                
+          
+              }
+
+                
+                if(mode == SCAN && checkValidFussionValue(data)){
+                 scanON=false;
+                  previous_mode=NONE;
+                  mode=RUNNING;
+                  displayfusiontime(data);
+                }
+                else
+                  {
+                      resetAll();
+                  }
+                   
+
+}
+
+
+
+void displayfTime(String data)
+{
+   String dvalue="";
+                        if(data!="")
+                        {
+                                int i= data.toInt();
+                                if(i<10)
+                                {
+                                  dvalue="00"+String(i);
+                                }
+                                else if(i>=10 && i<100)
+                                {
+                                  dvalue="0"+String(i);
+                                }
+                                else{
+                                    dvalue=String(i);
+                                  }
+                                  lcd.clear();
+                                lcd.setCursor (16, 0);
+                                lcd.print (dvalue);
+                                int j= data.toInt()*2;
+                                String dvalue="";
+                                
+                                if(j<10)
+                                {
+                                  dvalue="00"+String(j);
+                                }
+                                else if(j>=10 && j<100)
+                                {
+                                  dvalue="0"+String(j);
+                                }
+                                else{
+                                    dvalue=String(j);
+                                  }
+                                lcd.setCursor (16, 1);
+                                lcd.print (dvalue);               
+                        
+                                lcd.setCursor (0,3);
+                                if(fussionIndex == 0)
+                                {
+                                     lcd.print("PRESS OK to RESTART"); 
+                                }
+                                else{
+                                      lcd.print("PRESS R to RESET   ");
+                                  }  
+                                lcd.setCursor (0, 1);
+                                lcd.print("COOLING TIME :- "); 
+                                lcd.setCursor (0, 0);
+                                lcd.print("FUSION TIME  :- "); 
+                                delay (1000); 
+                      }             
+}
+
+bool checkValidFussionValue(String data)
+{
+
+  
+       int checkValue=data.toInt(); 
+       if(checkValue>=lower_limit && checkValue<=upper_limit)
+       {
+          return true;
+       }
+  return false;     
+}
+
+
+void BUZZ() {   //........................................................................
+
+   if (coolingIndex==0)
+{ 
+  digitalWrite (BUZZ_PIN, HIGH);
+  lcd.clear(); lcd.setCursor(1,1); lcd.print("Fusion Complete"); 
+  delay(2000);
+    //displayfTime(l_data);      ---------------   here is the change
+        digitalWrite (BUZZ_PIN, LOW);
+         if (fusion_state == 0){
+          action1();
+          }
+          else if 
+            (fusion_state == 1 ){
+               action2();
+          }
+         
+           }
+         }
+  
+
+
+void fusiontimeloop()
+{                               fussionIndex--;
+                                fussionON=true;
+                                String dvalue="";
+                                
+                                if(fussionIndex<10)
+                                {
+                                  dvalue="00"+String(fussionIndex);
+                                }
+                                else if(fussionIndex>=10 && fussionIndex<100)
+                                {
+                                  dvalue="0"+String(fussionIndex);
+                                }
+                                else{
+                                    dvalue=String(fussionIndex);
+                                  }
+                                lcd.setCursor (16, 0);
+                                lcd.print (dvalue);
+                                delay (1000);
+                                coolingTime();
+  
+ }
+void displayfusiontime(String data)
+{
+ 
+  lcd.noBlink();
+ 
+                  if(data!="")
+                  {
+                          l_data=data;
+                          buttonClicked=false;
+                          fussionIndex=data.toInt();
+                          fussionON=true;
+                          displayfTime(data);
+                  }
+
+}
+void coolingTimeLoop()
+{                               coolingIndex--;
+                                String dvalue="";
+                                if(coolingIndex<10)
+                                {
+                                  dvalue="00"+String(coolingIndex);
+                                }
+                                else if(coolingIndex>=10 && coolingIndex<100)
+                                {
+                                  dvalue="0"+String(coolingIndex);
+                                }
+                                else{
+                                    dvalue=String(coolingIndex);
+                                  }
+                                lcd.setCursor (16, 1);
+                                lcd.print (dvalue);
+                                delay (1000);
+}
+void coolingTime()
+{
+ 
+                          if(fussionIndex<=0)
+                          {
+                            fussionON=false;
+                            coolingON=true;
+                            coolingIndex= l_data.toInt()*2;
+                          } 
+}
